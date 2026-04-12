@@ -1,0 +1,15 @@
+dataset:
+  path: data/sprites
+  image_size: 16
+  palette_size: 2
+
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-3
+  log_interval: 10
+  sample_interval: 25
+  checkpoint_interval: 50
+
+mlflow:
+  tracking_uri: mlruns
