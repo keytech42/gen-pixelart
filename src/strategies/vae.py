@@ -36,7 +36,7 @@ class VAEStrategy(GenerativeStrategy):
         optimizer.zero_grad()
         recon, mu, log_var = model(batch)
 
-        recon_loss = torch.nn.functional.mse_loss(recon, batch, reduction="mean")
+        recon_loss = torch.nn.functional.binary_cross_entropy(recon, batch, reduction="mean")
         kl_loss = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
 
         loss = recon_loss + self.kl_weight * kl_loss
@@ -66,6 +66,6 @@ class VAEStrategy(GenerativeStrategy):
     ) -> dict[str, float]:
         with torch.no_grad():
             recon, mu, log_var = model(batch)
-            recon_loss = torch.nn.functional.mse_loss(recon, batch).item()
+            recon_loss = torch.nn.functional.binary_cross_entropy(recon, batch).item()
             kl_loss = (-0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())).item()
         return {"recon_loss": recon_loss, "kl_loss": kl_loss}

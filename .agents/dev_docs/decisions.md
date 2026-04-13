@@ -39,3 +39,13 @@ Cumulative log of non-obvious design decisions made across tasks.
 - **Linear beta schedule, not cosine**: Simpler, well-understood. Cosine schedule would improve fine detail quality but the difference is negligible at 16x16 monochrome.
 - **Smoke test uses timesteps=10**: Full 1000-step sampling in the smoke test would take too long. 10 steps validates the contract (shapes, types, gradients) without the wait.
 - **7.4M params is intentionally large**: Diffusion resists overfitting via noise injection (each image seen at 1000 noise levels). Larger capacity helps capture the full denoising mapping.
+
+## Task 6a: BCE loss for VAE
+
+- **BCE over MSE for binary sprites**: Confirmed experimentally. BCE gives stronger gradients near 0 and 1, pushing the model toward crisp black/white decisions. 500-epoch comparison showed BCE produces sharper edges, better silhouettes, and more black space between features. MSE produces softer blobs with white bleeding. Kept as the default loss.
+
+## Task 6b: VQ-VAE Prior
+
+- **Separate prior model, not integrated into strategy ABC**: The prior is a second model trained on VQ-VAE's output. Embedding it into the GenerativeStrategy ABC would complicate the interface for no benefit. Instead, VQVAEStrategy has an optional `prior` field — when set, `sample()` uses it; otherwise falls back to random indices.
+- **4-layer GPT over 16-token sequences**: 4x4 spatial grid = 16 codebook indices. Small transformer (828K params) with causal masking. CE loss dropped 4.03 → 0.45 in 300 epochs (~40 seconds). Completely fixed VQ-VAE sampling — output went from checkerboard noise to coherent sprites.
+- **Two-stage training script**: `scripts/train_vqvae_prior.py` handles both stages sequentially. Stage 1 trains VQ-VAE (500 epochs), stage 2 encodes dataset and trains prior (300 epochs). Clean separation — prior never modifies VQ-VAE weights.

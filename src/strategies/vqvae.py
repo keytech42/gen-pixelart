@@ -6,6 +6,7 @@ from omegaconf import DictConfig
 
 from src.models.codebook import VectorQuantizer
 from src.models.encoder import ConvDecoder, ConvEncoder
+from src.models.prior import IndexPrior
 from src.strategies.base import GenerativeStrategy
 
 
@@ -61,6 +62,7 @@ class VQVAEStrategy(GenerativeStrategy):
 
     def __init__(self) -> None:
         self.commitment_weight: float = 0.25
+        self.prior: IndexPrior | None = None
 
     def build_model(self, config: DictConfig) -> nn.Module:
         self.commitment_weight = config.model.commitment_weight
@@ -110,11 +112,17 @@ class VQVAEStrategy(GenerativeStrategy):
         device: torch.device,
     ) -> torch.Tensor:
         spatial = model.latent_spatial
-        indices = torch.randint(
-            0, model.quantizer.num_embeddings,
-            (n_samples, spatial, spatial),
-            device=device,
-        )
+        if self.prior is not None:
+            # Sample from learned prior
+            flat_indices = self.prior.sample(n_samples, device)
+            indices = flat_indices.view(n_samples, spatial, spatial)
+        else:
+            # Fallback: random indices (incoherent but functional)
+            indices = torch.randint(
+                0, model.quantizer.num_embeddings,
+                (n_samples, spatial, spatial),
+                device=device,
+            )
         z_q = model.quantizer.decode_indices(indices)
         return model.decode(z_q)
 

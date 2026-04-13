@@ -96,20 +96,38 @@ Key difference from VAE: **no flattening to a vector.** The encoder outputs a 4x
 
 This spatial structure is important: nearby positions in the grid correspond to nearby regions of the image. The codebook entries learn to represent local visual patterns, not global image properties.
 
-### Sampling: the missing piece
+### Sampling: random indices vs. learned prior
+
+**The naive approach** — random codebook indices — produces incoherent checkerboard noise:
 
 ```python
-def sample(self, model, n_samples, device):
-    indices = torch.randint(0, K, (n_samples, 4, 4))  # Random!
-    z_q = model.quantizer.decode_indices(indices)
-    return model.decode(z_q)
+# Random: ignores spatial structure entirely
+indices = torch.randint(0, K, (n_samples, 4, 4))
 ```
 
-This is the naive approach: pick random codebook indices and decode them. The results are blocky and incoherent because we're ignoring all spatial structure — the model learned that certain index patterns go together (e.g., entry #12 at position (0,0) usually appears next to entry #47 at position (0,1)), but random sampling doesn't respect this.
+The model learned that certain index patterns go together (e.g., entry #12 at position (0,0) usually appears next to entry #47 at position (0,1)), but random sampling doesn't respect this.
 
-The proper solution is a **prior model**: a small autoregressive network (like a Transformer or PixelCNN) trained to predict codebook index sequences. This is a two-stage process:
-1. Train VQ-VAE (done)
-2. Train a prior over the learned codebook indices (future work)
+**The fix: an autoregressive prior** (`src/models/prior.py`). A small GPT-style transformer (4 layers, 828K params) trained on the VQ-VAE's codebook index sequences. The 4x4 grid is flattened to 16 tokens and modeled autoregressively with causal masking:
+
+```python
+class IndexPrior(nn.Module):
+    def sample(self, n_samples, device, temperature=1.0):
+        indices = torch.randint(0, K, (n_samples, 1))  # Random first token
+        for i in range(1, 16):
+            logits = self.forward(indices)        # Predict next token
+            next_token = sample(logits[:, -1, :])  # From learned distribution
+            indices = cat([indices, next_token])
+        return indices
+```
+
+**Two-stage training** (`scripts/train_vqvae_prior.py`):
+1. Train VQ-VAE normally (500 epochs)
+2. Freeze VQ-VAE, encode full dataset → 873 sequences of 16 indices each
+3. Train prior on these sequences (300 epochs, CE loss 4.03 → 0.45, ~40 seconds)
+
+The result is dramatic: prior-sampled sprites look coherent (chests, buildings, icons), while random-index sprites are noise. The prior learned which codebook entries belong together and in what spatial arrangement.
+
+**Temperature controls diversity.** `temperature=1.0` matches the training distribution. Lower values (0.7-0.8) produce more typical, "safer" sprites. Higher values produce more varied but potentially less coherent output.
 
 ## Gotchas
 
