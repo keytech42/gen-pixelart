@@ -1,5 +1,5 @@
 dataset:
-  path: data/sprites
+  path: data/sprites_focused
   image_size: 16
   palette_size: 2
 
