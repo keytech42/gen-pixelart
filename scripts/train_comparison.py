@@ -21,8 +21,8 @@ from src.trainer import _save_sample_grid
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-EPOCHS = 500
-DATA_DIR = Path("data/sprites_focused")
+EPOCHS = 1000
+DATA_DIR = Path("data/sprites_colored_focused")
 OUTPUT_DIR = Path("data/comparison")
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
@@ -108,7 +108,8 @@ def main() -> None:
     augment = PixelArtAugment(flip_prob=0.5)
     dataset = SpriteDataset(DATA_DIR, image_size=16, transform=augment)
     raw_tensor = load_sprite_tensor(DATA_DIR, image_size=16)
-    palette = extract_palette(raw_tensor, num_colors=2).to(DEVICE)
+    config = load_config("configs/vae.yaml")  # Any config — they share base.yaml
+    palette = extract_palette(raw_tensor, num_colors=config.dataset.palette_size).to(DEVICE)
     logger.info("Dataset: %d sprites, palette: %s", len(dataset), palette.cpu().tolist())
 
     # Save real data grid for comparison

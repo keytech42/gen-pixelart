@@ -2,33 +2,37 @@
 
 A learning-oriented project comparing three generative architectures for producing 16x16 pixel art sprites. Built with PyTorch, tracked with MLflow.
 
-## Results (500 epochs on 873 focused sprites)
+## Results
 
-**Training data** (Kenney 1-Bit Pack, CC0):
+### Colored sprites (8-color palette, 1000 epochs)
+
+**Training data** (Kenney 1-Bit Pack colored variant, CC0):
+
+![Real colored sprites](samples/real_colored_data.png)
+
+**Diffusion (DDIM, 50-step sampling)**:
+
+![Diffusion colored](samples/diffusion_colored_final.png)
+
+Coherent colored sprites with correct palette use — buildings, monitors, characters. DDIM sampling produces these in under 1 second.
+
+**VAE**:
+
+![VAE colored](samples/vae_colored_final.png)
+
+Color placement is reasonable but shapes are blurry. Multi-color makes the VAE averaging problem more visible.
+
+### Monochrome sprites (2-color, 500 epochs)
+
+**Training data**:
 
 ![Real sprites](samples/real_data.png)
 
-### Diffusion (DDPM)
+| Diffusion | VAE (BCE loss) | VQ-VAE (with prior) |
+|-----------|---------------|---------------------|
+| ![Diffusion](samples/diffusion_final.png) | ![VAE](samples/vae_bce_final.png) | ![VQ-VAE](samples/vqvae_prior_final.png) |
 
-![Diffusion samples](samples/diffusion_final.png)
-
-Sharp, recognizable sprites with clean edges. Buildings, faces, chests, UI frames. The iterative denoising process mirrors how pixel artists work — rough shapes first, then refine individual pixels.
-
-### VAE
-
-![VAE samples](samples/vae_final.png)
-
-Blobby but structured. The classic VAE problem: MSE loss averages over uncertain pixels, producing gray where the model should commit to black or white. Palette snapping partially rescues this.
-
-### VQ-VAE
-
-![VQ-VAE samples](samples/vqvae_final.png)
-
-Checkerboard artifacts from random codebook index sampling. Without a learned prior over the codebook, the model can't generate coherent spatial structure. However, **reconstructions are excellent**:
-
-| Input | Reconstruction |
-|-------|---------------|
-| ![Input](samples/vqvae_input.png) | ![Reconstruction](samples/vqvae_recon.png) |
+Diffusion produces the sharpest output. VAE with BCE loss gives better edges than MSE. VQ-VAE with a learned autoregressive prior generates coherent sprites (random indices produce checkerboard noise).
 
 ## Architecture
 

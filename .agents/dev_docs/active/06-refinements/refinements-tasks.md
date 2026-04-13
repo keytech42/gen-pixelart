@@ -4,7 +4,7 @@
 - [x] Switch VAEStrategy loss from MSE to BCE
 - [x] Retrain 500 epochs on focused dataset
 - [x] Compare BCE vs MSE sample grids — BCE produces sharper edges, better silhouettes, more defined shapes
-- [ ] Update 02-vae.md tutorial with findings
+- [x] Update 02-vae.md tutorial with findings
 
 ## 6b. VQ-VAE autoregressive prior
 - [x] Encode full dataset through frozen VQ-VAE → collect 4x4 index grids (873 × 16 sequences)
@@ -12,7 +12,7 @@
 - [x] Train prior — CE loss 4.03 → 0.45 in 300 epochs (~40 seconds)
 - [x] Update VQVAEStrategy.sample() to use learned prior when available
 - [x] Comparison: prior samples are coherent sprites; random indices are checkerboard noise
-- [ ] Update 03-vqvae.md tutorial
+- [x] Update 03-vqvae.md tutorial
 
 ## 6c. DDIM sampling
 - [x] Implement ddim_sample in NoiseScheduler (eta parameter, timestep subsequence)
@@ -22,8 +22,11 @@
 - [x] Smoke test passes with DDIM path
 
 ## 6d. Colored sprites
-- [ ] Slice Kenney colored tilesheet
-- [ ] Update palette extraction for multi-color
-- [ ] Retune configs (palette_size, potentially model capacity)
-- [ ] Retrain all three strategies
+- [x] Slice Kenney colored tilesheet (colored-transparent_packed.png → 1077 sprites, 8-color palette)
+- [x] Filter to 873 focused sprites (same density filter)
+- [x] VAE loss made configurable (MSE for colored, BCE for binary) via config
+- [x] Update configs (palette_size=8, data path)
+- [x] Updated download_data.py to support both mono and colored variants
+- [x] Retrain all three strategies at 1000 epochs — diffusion produces coherent colored sprites
 - [ ] Update 01-data-pipeline.md tutorial
+- [ ] Update README with colored samples

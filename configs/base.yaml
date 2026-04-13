@@ -1,7 +1,7 @@
 dataset:
-  path: data/sprites_focused
+  path: data/sprites_colored_focused
   image_size: 16
-  palette_size: 2
+  palette_size: 8
 
 training:
   epochs: 100

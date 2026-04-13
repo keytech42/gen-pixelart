@@ -55,3 +55,10 @@ Cumulative log of non-obvious design decisions made across tasks.
 - **DDIM 50 steps as default**: 16.4x speedup (0.83s vs 13.6s for 16 images) with comparable visual quality. Config defaults to `sampling_method: ddim, sampling_steps: 50`.
 - **eta=0 (deterministic)**: Same noise → same image. Useful for reproducibility. DDPM equivalence at eta=1 preserved as a fallback.
 - **Backward compatible**: `sampling_method` defaults to `"ddpm"` if not in config, so old configs and smoke test still work. Smoke test uses `sampling_method: ddim` with 5 steps to validate the DDIM code path quickly.
+
+## Task 6d: Colored Sprites
+
+- **VAE recon_loss made configurable**: BCE for binary sprites, MSE for colored. Config key `model.recon_loss: mse|bce`, defaults to MSE. BCE assumes binary targets and breaks on multi-color data.
+- **8-color palette, 5 centroids collapse to black**: K-means on mostly-black-background sprites wastes centroids on near-black variants. The 3 non-black centroids (brown, teal, gray) are the useful ones. Palette snapping still works — sprites get mapped to the closest of 8 colors.
+- **1000 epochs for colored**: Doubled from 500. Colored sprites (8 colors) are a harder distribution than binary. Diffusion noise_mse dropped from 0.41 to 0.008 over 1000 epochs. VAE and VQ-VAE plateau earlier (~500 epochs).
+- **download_data.py supports --variant mono|colored|both**: Single script handles both tilesheets and the density-based focusing filter.

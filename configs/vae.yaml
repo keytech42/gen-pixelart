@@ -8,3 +8,4 @@ model:
   encoder_channels: [32, 64]
   decoder_channels: [64, 32]
   kl_weight: 0.0005
+  recon_loss: mse

@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
 
 from src.models.encoder import VAEModel
@@ -11,14 +12,22 @@ from src.strategies.base import GenerativeStrategy
 class VAEStrategy(GenerativeStrategy):
     """VAE generative strategy.
 
-    Loss: MSE reconstruction + beta-weighted KL divergence.
+    Loss: reconstruction (MSE or BCE) + beta-weighted KL divergence.
+    Use BCE for binary sprites, MSE for colored/continuous.
     """
 
     def __init__(self) -> None:
         self.kl_weight: float = 0.0005
+        self.recon_loss_type: str = "mse"
+
+    def _recon_loss(self, recon: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if self.recon_loss_type == "bce":
+            return F.binary_cross_entropy(recon, target, reduction="mean")
+        return F.mse_loss(recon, target, reduction="mean")
 
     def build_model(self, config: DictConfig) -> nn.Module:
         self.kl_weight = config.model.kl_weight
+        self.recon_loss_type = config.model.get("recon_loss", "mse")
         return VAEModel(
             in_channels=3,
             image_size=config.dataset.image_size,
@@ -36,7 +45,7 @@ class VAEStrategy(GenerativeStrategy):
         optimizer.zero_grad()
         recon, mu, log_var = model(batch)
 
-        recon_loss = torch.nn.functional.binary_cross_entropy(recon, batch, reduction="mean")
+        recon_loss = self._recon_loss(recon, batch)
         kl_loss = -0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())
 
         loss = recon_loss + self.kl_weight * kl_loss
@@ -66,6 +75,6 @@ class VAEStrategy(GenerativeStrategy):
     ) -> dict[str, float]:
         with torch.no_grad():
             recon, mu, log_var = model(batch)
-            recon_loss = torch.nn.functional.binary_cross_entropy(recon, batch).item()
+            recon_loss = self._recon_loss(recon, batch).item()
             kl_loss = (-0.5 * torch.mean(1 + log_var - mu.pow(2) - log_var.exp())).item()
         return {"recon_loss": recon_loss, "kl_loss": kl_loss}
