@@ -13,6 +13,9 @@ class GenerativeStrategy(ABC):
     Each strategy encapsulates model construction, a single training step,
     sampling, and metric computation. The Trainer (context) calls these
     methods without knowing which generative approach is running.
+
+    Labels are optional throughout — when provided, strategies that support
+    conditioning use them; others ignore them.
     """
 
     @abstractmethod
@@ -26,6 +29,7 @@ class GenerativeStrategy(ABC):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         batch: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> dict[str, float]:
         """Run one training step. Returns a loss dict with named losses."""
         ...
@@ -36,8 +40,13 @@ class GenerativeStrategy(ABC):
         model: nn.Module,
         n_samples: int,
         device: torch.device,
+        class_label: int | None = None,
     ) -> torch.Tensor:
-        """Generate samples. Returns tensor of shape (N, C, H, W)."""
+        """Generate samples. Returns tensor of shape (N, C, H, W).
+
+        If class_label is provided and the strategy supports conditioning,
+        generates samples of that class.
+        """
         ...
 
     @abstractmethod

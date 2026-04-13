@@ -26,10 +26,18 @@ class UNet(nn.Module):
         channels: list[int],
         num_res_blocks: int,
         time_emb_dim: int,
+        num_classes: int | None = None,
     ) -> None:
         super().__init__()
 
         self.time_embed = SinusoidalTimeEmbedding(time_emb_dim)
+
+        # Optional class conditioning — added to time embedding
+        if num_classes is not None:
+            self.class_embed = nn.Embedding(num_classes, time_emb_dim)
+        else:
+            self.class_embed = None
+
         self.input_conv = nn.Conv2d(in_channels, channels[0], kernel_size=3, padding=1)
 
         # Down path
@@ -75,8 +83,13 @@ class UNet(nn.Module):
         self.out_act = nn.SiLU()
         self.out_conv = nn.Conv2d(rev_channels[-1], out_channels, kernel_size=3, padding=1)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor, class_label: torch.Tensor | None = None) -> torch.Tensor:
         t_emb = self.time_embed(t)
+
+        # Add class conditioning to time embedding
+        if class_label is not None and self.class_embed is not None:
+            t_emb = t_emb + self.class_embed(class_label)
+
         h = self.input_conv(x)
 
         # Down path — collect skip connections

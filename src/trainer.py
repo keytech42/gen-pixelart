@@ -111,10 +111,13 @@ class Trainer:
         for epoch in range(cfg.epochs):
             for batch in loader:
                 if isinstance(batch, (list, tuple)):
-                    batch = batch[0]
-                batch = batch.to(self.device)
+                    images = batch[0].to(self.device)
+                    labels = batch[1].to(self.device) if len(batch) > 1 else None
+                else:
+                    images = batch.to(self.device)
+                    labels = None
 
-                loss_dict = self.strategy.train_step(self.model, self.optimizer, batch)
+                loss_dict = self.strategy.train_step(self.model, self.optimizer, images, labels=labels)
 
                 if global_step % cfg.log_interval == 0:
                     self.mlflow_logger.log_metrics(loss_dict, step=global_step)

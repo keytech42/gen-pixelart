@@ -42,6 +42,8 @@ TEST_CONFIG = OmegaConf.create({
         "time_emb_dim": 64,
         "sampling_method": "ddim",
         "sampling_steps": 5,
+        "num_classes": 4,
+        "recon_loss": "mse",
     },
 })
 
@@ -60,7 +62,7 @@ def test_strategy(name: str, strategy: GenerativeStrategy) -> bool:
 
         batch = torch.rand(BATCH_SIZE, CHANNELS, IMAGE_SIZE, IMAGE_SIZE, device=DEVICE)
 
-        # train_step
+        # train_step (unconditional)
         loss_dict = strategy.train_step(model, optimizer, batch)
         assert isinstance(loss_dict, dict), f"train_step should return dict, got {type(loss_dict)}"
         for k, v in loss_dict.items():
@@ -68,10 +70,20 @@ def test_strategy(name: str, strategy: GenerativeStrategy) -> bool:
             assert isinstance(v, (int, float)), f"loss value for '{k}' should be numeric, got {type(v)}"
         logger.info("  train_step OK: %s", loss_dict)
 
-        # sample
+        # train_step (with labels)
+        labels = torch.randint(0, 4, (BATCH_SIZE,), device=DEVICE)
+        loss_dict_cond = strategy.train_step(model, optimizer, batch, labels=labels)
+        logger.info("  train_step (conditional) OK: %s", loss_dict_cond)
+
+        # sample (unconditional)
         samples = strategy.sample(model, N_SAMPLES, DEVICE)
         assert samples.shape[0] == N_SAMPLES, f"Expected {N_SAMPLES} samples, got {samples.shape[0]}"
         logger.info("  sample OK: shape=%s", samples.shape)
+
+        # sample (conditional)
+        samples_cond = strategy.sample(model, N_SAMPLES, DEVICE, class_label=0)
+        assert samples_cond.shape[0] == N_SAMPLES, f"Expected {N_SAMPLES} conditional samples"
+        logger.info("  sample (class=0) OK: shape=%s", samples_cond.shape)
 
         # get_metrics
         metrics = strategy.get_metrics(model, batch)

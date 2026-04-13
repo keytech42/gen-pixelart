@@ -73,11 +73,12 @@ class NoiseScheduler:
         model: nn.Module,
         x_t: torch.Tensor,
         t: torch.Tensor,
+        class_label: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """DDPM reverse process: denoise x_t by one step (stochastic)."""
         t_idx = t[0].item()
 
-        pred_noise = model(x_t, t)
+        pred_noise = model(x_t, t, class_label=class_label)
 
         beta = self.betas[t_idx]
         sqrt_recip_alpha = self.sqrt_recip_alpha[t_idx]
@@ -98,6 +99,7 @@ class NoiseScheduler:
         x: torch.Tensor,
         timestep_seq: list[int],
         eta: float = 0.0,
+        class_label: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """DDIM sampling: deterministic (eta=0) or stochastic (eta>0) denoising.
 
@@ -122,7 +124,7 @@ class NoiseScheduler:
             t_prev = timestep_seq[i + 1] if i + 1 < len(timestep_seq) else 0
 
             t_batch = torch.full((n,), t_cur, device=device, dtype=torch.long)
-            pred_noise = model(x, t_batch)
+            pred_noise = model(x, t_batch, class_label=class_label)
 
             alpha_bar_t = self.alpha_bar[t_cur]
             alpha_bar_prev = self.alpha_bar[t_prev] if t_prev > 0 else torch.tensor(1.0, device=device)
@@ -173,12 +175,14 @@ class DiffusionStrategy(GenerativeStrategy):
             beta_start=config.model.beta_start,
             beta_end=config.model.beta_end,
         )
+        num_classes = config.model.get("num_classes", None)
         return UNet(
             in_channels=3,
             out_channels=3,
             channels=list(config.model.channels),
             num_res_blocks=config.model.num_res_blocks,
             time_emb_dim=config.model.time_emb_dim,
+            num_classes=num_classes,
         )
 
     def train_step(
@@ -186,6 +190,7 @@ class DiffusionStrategy(GenerativeStrategy):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         batch: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> dict[str, float]:
         assert self.scheduler is not None
         device = batch.device
@@ -197,7 +202,7 @@ class DiffusionStrategy(GenerativeStrategy):
 
         t = torch.randint(0, self.timesteps, (batch.shape[0],), device=device)
         x_t, noise = self.scheduler.q_sample(batch, t)
-        pred_noise = model(x_t, t)
+        pred_noise = model(x_t, t, class_label=labels)
         loss = torch.nn.functional.mse_loss(pred_noise, noise)
 
         loss.backward()
@@ -210,21 +215,27 @@ class DiffusionStrategy(GenerativeStrategy):
         model: nn.Module,
         n_samples: int,
         device: torch.device,
+        class_label: int | None = None,
     ) -> torch.Tensor:
         assert self.scheduler is not None
         if self.scheduler.betas.device != device:
             self.scheduler.to(device)
+
+        # Build class label tensor if specified
+        labels = None
+        if class_label is not None:
+            labels = torch.full((n_samples,), class_label, device=device, dtype=torch.long)
 
         x = torch.randn(n_samples, 3, self.image_size, self.image_size, device=device)
 
         if self.sampling_method == "ddim":
             step_size = max(1, self.timesteps // self.sampling_steps)
             timestep_seq = list(range(self.timesteps - 1, 0, -step_size))
-            x = self.scheduler.ddim_sample(model, x, timestep_seq, eta=0.0)
+            x = self.scheduler.ddim_sample(model, x, timestep_seq, eta=0.0, class_label=labels)
         else:
             for t_val in reversed(range(self.timesteps)):
                 t = torch.full((n_samples,), t_val, device=device, dtype=torch.long)
-                x = self.scheduler.p_sample(model, x, t)
+                x = self.scheduler.p_sample(model, x, t, class_label=labels)
 
         return x.clamp(0, 1)
 

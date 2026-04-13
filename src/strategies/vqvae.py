@@ -80,6 +80,7 @@ class VQVAEStrategy(GenerativeStrategy):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         batch: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> dict[str, float]:
         optimizer.zero_grad()
         recon, indices, codebook_loss, commitment_loss = model(batch)
@@ -110,6 +111,7 @@ class VQVAEStrategy(GenerativeStrategy):
         model: nn.Module,
         n_samples: int,
         device: torch.device,
+        class_label: int | None = None,
     ) -> torch.Tensor:
         spatial = model.latent_spatial
         if self.prior is not None:

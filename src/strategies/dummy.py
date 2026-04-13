@@ -36,6 +36,7 @@ class DummyStrategy(GenerativeStrategy):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         batch: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> dict[str, float]:
         optimizer.zero_grad()
         out = model(batch)
@@ -49,6 +50,7 @@ class DummyStrategy(GenerativeStrategy):
         model: nn.Module,
         n_samples: int,
         device: torch.device,
+        class_label: int | None = None,
     ) -> torch.Tensor:
         image_size = model.image_size  # type: ignore[attr-defined]
         return torch.rand(n_samples, 3, image_size, image_size, device=device)

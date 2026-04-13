@@ -12,3 +12,4 @@ model:
   time_emb_dim: 128
   sampling_method: ddim
   sampling_steps: 50
+  num_classes: 8

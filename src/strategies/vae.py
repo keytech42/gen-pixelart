@@ -41,6 +41,7 @@ class VAEStrategy(GenerativeStrategy):
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         batch: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> dict[str, float]:
         optimizer.zero_grad()
         recon, mu, log_var = model(batch)
@@ -64,6 +65,7 @@ class VAEStrategy(GenerativeStrategy):
         model: nn.Module,
         n_samples: int,
         device: torch.device,
+        class_label: int | None = None,
     ) -> torch.Tensor:
         z = torch.randn(n_samples, model.latent_dim, device=device)
         return model.decode(z)

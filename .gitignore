@@ -8,6 +8,6 @@ mlruns/
 dist/
 build/
 .venv/
-data/
+/data/
 *.png
 !samples/*.png
