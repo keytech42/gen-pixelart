@@ -150,6 +150,66 @@ class NoiseScheduler:
 
         return x
 
+    def p_sample_from_eps(
+        self,
+        x_t: torch.Tensor,
+        t: torch.Tensor,
+        pred_noise: torch.Tensor,
+    ) -> torch.Tensor:
+        """DDPM reverse step using a pre-computed noise prediction (for CFG)."""
+        t_idx = t[0].item()
+
+        beta = self.betas[t_idx]
+        sqrt_recip_alpha = self.sqrt_recip_alpha[t_idx]
+        sqrt_one_minus_ab = self.sqrt_one_minus_alpha_bar[t_idx]
+
+        mean = sqrt_recip_alpha * (x_t - beta / sqrt_one_minus_ab * pred_noise)
+
+        if t_idx > 0:
+            noise = torch.randn_like(x_t)
+            sigma = torch.sqrt(self.posterior_variance[t_idx])
+            return mean + sigma * noise
+        return mean
+
+    def ddim_sample_guided(
+        self,
+        noise_pred_fn: callable,
+        model: nn.Module,
+        x: torch.Tensor,
+        timestep_seq: list[int],
+        labels: torch.Tensor | None,
+        eta: float = 0.0,
+    ) -> torch.Tensor:
+        """DDIM sampling with an external noise prediction function (for CFG)."""
+        n = x.shape[0]
+        device = x.device
+
+        for i in range(len(timestep_seq)):
+            t_cur = timestep_seq[i]
+            t_prev = timestep_seq[i + 1] if i + 1 < len(timestep_seq) else 0
+
+            t_batch = torch.full((n,), t_cur, device=device, dtype=torch.long)
+            pred_noise = noise_pred_fn(model, x, t_batch, labels)
+
+            alpha_bar_t = self.alpha_bar[t_cur]
+            alpha_bar_prev = self.alpha_bar[t_prev] if t_prev > 0 else torch.tensor(1.0, device=device)
+
+            pred_x0 = (x - torch.sqrt(1.0 - alpha_bar_t) * pred_noise) / torch.sqrt(alpha_bar_t)
+            pred_x0 = pred_x0.clamp(-1, 1)
+
+            sigma = eta * torch.sqrt(
+                (1.0 - alpha_bar_prev) / (1.0 - alpha_bar_t)
+                * (1.0 - alpha_bar_t / alpha_bar_prev)
+            )
+
+            dir_xt = torch.sqrt(1.0 - alpha_bar_prev - sigma ** 2) * pred_noise
+            x = torch.sqrt(alpha_bar_prev) * pred_x0 + dir_xt
+
+            if eta > 0 and t_prev > 0:
+                x = x + sigma * torch.randn_like(x)
+
+        return x
+
 
 class DiffusionStrategy(GenerativeStrategy):
     """DDPM/DDIM generative strategy.
@@ -164,12 +224,18 @@ class DiffusionStrategy(GenerativeStrategy):
         self.image_size: int = 16
         self.sampling_method: str = "ddpm"
         self.sampling_steps: int = 1000
+        self.num_classes: int | None = None
+        self.p_uncond: float = 0.1
+        self.guidance_scale: float = 1.0
 
     def build_model(self, config: DictConfig) -> nn.Module:
         self.timesteps = config.model.timesteps
         self.image_size = config.dataset.image_size
         self.sampling_method = config.model.get("sampling_method", "ddpm")
         self.sampling_steps = config.model.get("sampling_steps", self.timesteps)
+        self.num_classes = config.model.get("num_classes", None)
+        self.p_uncond = config.model.get("p_uncond", 0.1)
+        self.guidance_scale = config.model.get("guidance_scale", 1.0)
         self.scheduler = NoiseScheduler(
             timesteps=self.timesteps,
             beta_start=config.model.beta_start,
@@ -202,6 +268,13 @@ class DiffusionStrategy(GenerativeStrategy):
 
         t = torch.randint(0, self.timesteps, (batch.shape[0],), device=device)
         x_t, noise = self.scheduler.q_sample(batch, t)
+
+        # CFG: randomly drop labels → null token during training
+        if labels is not None and self.num_classes is not None and self.p_uncond > 0:
+            drop_mask = torch.rand(batch.shape[0], device=device) < self.p_uncond
+            labels = labels.clone()
+            labels[drop_mask] = self.num_classes  # null class token
+
         pred_noise = model(x_t, t, class_label=labels)
         loss = torch.nn.functional.mse_loss(pred_noise, noise)
 
@@ -210,16 +283,44 @@ class DiffusionStrategy(GenerativeStrategy):
 
         return {"noise_prediction_mse": loss.item()}
 
+    def _guided_noise_pred(
+        self,
+        model: nn.Module,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        labels: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Compute noise prediction with classifier-free guidance.
+
+        If guidance_scale > 1 and labels are provided, runs the model twice:
+        once conditional, once unconditional, then blends.
+        """
+        if labels is None or self.guidance_scale <= 1.0 or self.num_classes is None:
+            return model(x, t, class_label=labels)
+
+        # Conditional prediction
+        eps_cond = model(x, t, class_label=labels)
+        # Unconditional prediction (null class token)
+        null_labels = torch.full_like(labels, self.num_classes)
+        eps_uncond = model(x, t, class_label=null_labels)
+        # Guided blend
+        return eps_uncond + self.guidance_scale * (eps_cond - eps_uncond)
+
     def sample(
         self,
         model: nn.Module,
         n_samples: int,
         device: torch.device,
         class_label: int | None = None,
+        guidance_scale: float | None = None,
     ) -> torch.Tensor:
         assert self.scheduler is not None
         if self.scheduler.betas.device != device:
             self.scheduler.to(device)
+
+        scale = guidance_scale if guidance_scale is not None else self.guidance_scale
+        saved_scale = self.guidance_scale
+        self.guidance_scale = scale
 
         # Build class label tensor if specified
         labels = None
@@ -231,12 +332,16 @@ class DiffusionStrategy(GenerativeStrategy):
         if self.sampling_method == "ddim":
             step_size = max(1, self.timesteps // self.sampling_steps)
             timestep_seq = list(range(self.timesteps - 1, 0, -step_size))
-            x = self.scheduler.ddim_sample(model, x, timestep_seq, eta=0.0, class_label=labels)
+            x = self.scheduler.ddim_sample_guided(
+                self._guided_noise_pred, model, x, timestep_seq, labels, eta=0.0,
+            )
         else:
             for t_val in reversed(range(self.timesteps)):
                 t = torch.full((n_samples,), t_val, device=device, dtype=torch.long)
-                x = self.scheduler.p_sample(model, x, t, class_label=labels)
+                eps = self._guided_noise_pred(model, x, t, labels)
+                x = self.scheduler.p_sample_from_eps(x, t, eps)
 
+        self.guidance_scale = saved_scale
         return x.clamp(0, 1)
 
     def get_metrics(

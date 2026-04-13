@@ -13,3 +13,5 @@ model:
   sampling_method: ddim
   sampling_steps: 50
   num_classes: 8
+  p_uncond: 0.1
+  guidance_scale: 3.0

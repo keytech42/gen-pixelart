@@ -33,8 +33,10 @@ class UNet(nn.Module):
         self.time_embed = SinusoidalTimeEmbedding(time_emb_dim)
 
         # Optional class conditioning — added to time embedding
+        # Extra entry at index num_classes is the null/unconditional token (for CFG)
+        self.num_classes = num_classes
         if num_classes is not None:
-            self.class_embed = nn.Embedding(num_classes, time_emb_dim)
+            self.class_embed = nn.Embedding(num_classes + 1, time_emb_dim)
         else:
             self.class_embed = None
 
