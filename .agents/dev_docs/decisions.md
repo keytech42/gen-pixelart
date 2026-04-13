@@ -49,3 +49,9 @@ Cumulative log of non-obvious design decisions made across tasks.
 - **Separate prior model, not integrated into strategy ABC**: The prior is a second model trained on VQ-VAE's output. Embedding it into the GenerativeStrategy ABC would complicate the interface for no benefit. Instead, VQVAEStrategy has an optional `prior` field — when set, `sample()` uses it; otherwise falls back to random indices.
 - **4-layer GPT over 16-token sequences**: 4x4 spatial grid = 16 codebook indices. Small transformer (828K params) with causal masking. CE loss dropped 4.03 → 0.45 in 300 epochs (~40 seconds). Completely fixed VQ-VAE sampling — output went from checkerboard noise to coherent sprites.
 - **Two-stage training script**: `scripts/train_vqvae_prior.py` handles both stages sequentially. Stage 1 trains VQ-VAE (500 epochs), stage 2 encodes dataset and trains prior (300 epochs). Clean separation — prior never modifies VQ-VAE weights.
+
+## Task 6c: DDIM Sampling
+
+- **DDIM 50 steps as default**: 16.4x speedup (0.83s vs 13.6s for 16 images) with comparable visual quality. Config defaults to `sampling_method: ddim, sampling_steps: 50`.
+- **eta=0 (deterministic)**: Same noise → same image. Useful for reproducibility. DDPM equivalence at eta=1 preserved as a fallback.
+- **Backward compatible**: `sampling_method` defaults to `"ddpm"` if not in config, so old configs and smoke test still work. Smoke test uses `sampling_method: ddim` with 5 steps to validate the DDIM code path quickly.

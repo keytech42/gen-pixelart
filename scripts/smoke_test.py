@@ -40,6 +40,8 @@ TEST_CONFIG = OmegaConf.create({
         "beta_start": 1e-4,
         "beta_end": 0.02,
         "time_emb_dim": 64,
+        "sampling_method": "ddim",
+        "sampling_steps": 5,
     },
 })
 

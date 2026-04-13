@@ -129,9 +129,41 @@ Each step partially denoises the image. The formula comes from Bayes' rule appli
 
 The `σ_t` (posterior variance) term adds controlled randomness. This is what makes the sampler *generative* rather than deterministic — different random seeds produce different images.
 
-## Gotchas
+### DDIM: fast deterministic sampling (`src/strategies/diffusion.py: ddim_sample`)
 
-**Sampling speed.** 1000 forward passes through a 7.4M parameter U-Net. On MPS, sampling 16 images takes ~12 seconds. This is the main practical drawback of DDPM. Solutions exist (DDIM sampling reduces to ~50 steps, consistency distillation reduces to 1-2 steps) but aren't implemented here.
+DDPM requires 1000 U-Net forward passes — ~13.6 seconds for 16 images. DDIM (Denoising Diffusion Implicit Models) cuts this to ~50 steps with near-identical quality by exploiting a key insight: the denoising process doesn't *have* to be Markovian.
+
+DDPM defines a Markov chain: x_t depends only on x_{t-1}. This means you must visit every timestep. DDIM defines a *non-Markovian* process that can skip timesteps — jumping directly from t=999 to t=979 to t=959, etc.
+
+The DDIM update rule at each step from t → t_prev:
+
+```python
+# 1. Predict the clean image x_0 from current noisy x_t
+pred_x0 = (x_t - sqrt(1-ᾱ_t) * eps_theta) / sqrt(ᾱ_t)
+
+# 2. Compute "direction pointing to x_t" 
+dir_xt = sqrt(1 - ᾱ_{t_prev} - σ²) * eps_theta
+
+# 3. DDIM update (σ=0 for deterministic)
+x_{t_prev} = sqrt(ᾱ_{t_prev}) * pred_x0 + dir_xt + σ * noise
+```
+
+**The `eta` parameter** controls stochasticity:
+- `eta=0`: fully deterministic. Same starting noise always produces the same image. Useful for debugging and interpolation.
+- `eta=1`: equivalent to DDPM (adds full stochastic noise at each step).
+- `0 < eta < 1`: interpolates between deterministic and stochastic.
+
+**Speed/quality tradeoff** (measured on MPS, 16 images):
+
+| Method | Steps | Time | Quality |
+|--------|-------|------|---------|
+| DDPM | 1000 | 13.6s | Baseline |
+| DDIM | 50 | 0.83s | Near-identical |
+| DDIM | 20 | ~0.35s | Slight degradation |
+
+50 steps is the default — **16x speedup** with no visible quality loss.
+
+## Gotchas
 
 **The loss doesn't directly measure image quality.** `noise_prediction_mse` tells you how well the model predicts noise, not how good the generated images look. A model can have low noise prediction error but still produce blurry or incoherent samples — especially early in training when it's only good at predicting noise at high timesteps. Always check the sample grids, not just the loss curve.
 

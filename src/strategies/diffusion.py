@@ -1,4 +1,4 @@
-"""DDPM diffusion strategy — iterative denoising from pure noise."""
+"""DDPM/DDIM diffusion strategy — iterative denoising from pure noise."""
 
 import torch
 import torch.nn as nn
@@ -9,10 +9,10 @@ from src.strategies.base import GenerativeStrategy
 
 
 class NoiseScheduler:
-    """Linear beta noise schedule for DDPM.
+    """Linear beta noise schedule for DDPM/DDIM.
 
     Precomputes all the alpha/alpha_bar constants needed for
-    the forward (q_sample) and reverse (p_sample) processes.
+    the forward (q_sample) and reverse (p_sample / ddim_sample) processes.
     """
 
     def __init__(
@@ -74,11 +74,8 @@ class NoiseScheduler:
         x_t: torch.Tensor,
         t: torch.Tensor,
     ) -> torch.Tensor:
-        """Reverse process: denoise x_t by one step.
-
-        x_{t-1} = (1/sqrt(alpha_t)) * (x_t - (beta_t/sqrt(1-alpha_bar_t)) * eps_theta) + sigma_t * z
-        """
-        t_idx = t[0].item()  # All elements in batch have same t during sampling
+        """DDPM reverse process: denoise x_t by one step (stochastic)."""
+        t_idx = t[0].item()
 
         pred_noise = model(x_t, t)
 
@@ -86,7 +83,6 @@ class NoiseScheduler:
         sqrt_recip_alpha = self.sqrt_recip_alpha[t_idx]
         sqrt_one_minus_ab = self.sqrt_one_minus_alpha_bar[t_idx]
 
-        # Predicted mean
         mean = sqrt_recip_alpha * (x_t - beta / sqrt_one_minus_ab * pred_noise)
 
         if t_idx > 0:
@@ -96,22 +92,82 @@ class NoiseScheduler:
         else:
             return mean
 
+    def ddim_sample(
+        self,
+        model: nn.Module,
+        x: torch.Tensor,
+        timestep_seq: list[int],
+        eta: float = 0.0,
+    ) -> torch.Tensor:
+        """DDIM sampling: deterministic (eta=0) or stochastic (eta>0) denoising.
+
+        Skips timesteps by using the non-Markovian DDIM update rule.
+        When eta=0, sampling is fully deterministic (same noise → same image).
+        When eta=1, equivalent to DDPM.
+
+        Args:
+            model: noise prediction U-Net.
+            x: (N, C, H, W) starting noise.
+            timestep_seq: descending list of timesteps to denoise through.
+            eta: stochasticity parameter (0 = deterministic).
+
+        Returns:
+            (N, C, H, W) denoised images.
+        """
+        n = x.shape[0]
+        device = x.device
+
+        for i in range(len(timestep_seq)):
+            t_cur = timestep_seq[i]
+            t_prev = timestep_seq[i + 1] if i + 1 < len(timestep_seq) else 0
+
+            t_batch = torch.full((n,), t_cur, device=device, dtype=torch.long)
+            pred_noise = model(x, t_batch)
+
+            alpha_bar_t = self.alpha_bar[t_cur]
+            alpha_bar_prev = self.alpha_bar[t_prev] if t_prev > 0 else torch.tensor(1.0, device=device)
+
+            # Predict x_0 from x_t and predicted noise
+            pred_x0 = (x - torch.sqrt(1.0 - alpha_bar_t) * pred_noise) / torch.sqrt(alpha_bar_t)
+            pred_x0 = pred_x0.clamp(-1, 1)
+
+            # DDIM variance
+            sigma = eta * torch.sqrt(
+                (1.0 - alpha_bar_prev) / (1.0 - alpha_bar_t)
+                * (1.0 - alpha_bar_t / alpha_bar_prev)
+            )
+
+            # Direction pointing to x_t
+            dir_xt = torch.sqrt(1.0 - alpha_bar_prev - sigma ** 2) * pred_noise
+
+            # DDIM update
+            x = torch.sqrt(alpha_bar_prev) * pred_x0 + dir_xt
+
+            if eta > 0 and t_prev > 0:
+                x = x + sigma * torch.randn_like(x)
+
+        return x
+
 
 class DiffusionStrategy(GenerativeStrategy):
-    """DDPM generative strategy.
+    """DDPM/DDIM generative strategy.
 
     Training: sample timestep, add noise, predict noise, MSE loss.
-    Sampling: iterative denoising from pure noise over T steps.
+    Sampling: DDPM (1000 steps, stochastic) or DDIM (configurable steps, deterministic).
     """
 
     def __init__(self) -> None:
         self.scheduler: NoiseScheduler | None = None
         self.timesteps: int = 1000
         self.image_size: int = 16
+        self.sampling_method: str = "ddpm"
+        self.sampling_steps: int = 1000
 
     def build_model(self, config: DictConfig) -> nn.Module:
         self.timesteps = config.model.timesteps
         self.image_size = config.dataset.image_size
+        self.sampling_method = config.model.get("sampling_method", "ddpm")
+        self.sampling_steps = config.model.get("sampling_steps", self.timesteps)
         self.scheduler = NoiseScheduler(
             timesteps=self.timesteps,
             beta_start=config.model.beta_start,
@@ -134,22 +190,14 @@ class DiffusionStrategy(GenerativeStrategy):
         assert self.scheduler is not None
         device = batch.device
 
-        # Move scheduler to device on first call
         if self.scheduler.betas.device != device:
             self.scheduler.to(device)
 
         optimizer.zero_grad()
 
-        # Sample random timesteps
         t = torch.randint(0, self.timesteps, (batch.shape[0],), device=device)
-
-        # Forward process: add noise
         x_t, noise = self.scheduler.q_sample(batch, t)
-
-        # Predict the noise
         pred_noise = model(x_t, t)
-
-        # Loss: MSE between predicted and actual noise
         loss = torch.nn.functional.mse_loss(pred_noise, noise)
 
         loss.backward()
@@ -167,15 +215,17 @@ class DiffusionStrategy(GenerativeStrategy):
         if self.scheduler.betas.device != device:
             self.scheduler.to(device)
 
-        # Start from pure noise
         x = torch.randn(n_samples, 3, self.image_size, self.image_size, device=device)
 
-        # Iterative denoising
-        for t_val in reversed(range(self.timesteps)):
-            t = torch.full((n_samples,), t_val, device=device, dtype=torch.long)
-            x = self.scheduler.p_sample(model, x, t)
+        if self.sampling_method == "ddim":
+            step_size = max(1, self.timesteps // self.sampling_steps)
+            timestep_seq = list(range(self.timesteps - 1, 0, -step_size))
+            x = self.scheduler.ddim_sample(model, x, timestep_seq, eta=0.0)
+        else:
+            for t_val in reversed(range(self.timesteps)):
+                t = torch.full((n_samples,), t_val, device=device, dtype=torch.long)
+                x = self.scheduler.p_sample(model, x, t)
 
-        # Clamp to [0, 1]
         return x.clamp(0, 1)
 
     def get_metrics(

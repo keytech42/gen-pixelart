@@ -15,10 +15,11 @@
 - [ ] Update 03-vqvae.md tutorial
 
 ## 6c. DDIM sampling
-- [ ] Implement DDIM sampler in NoiseScheduler
-- [ ] Add sampling_steps config option
-- [ ] Compare 50-step DDIM vs 1000-step DDPM visually
-- [ ] Update 04-diffusion.md tutorial
+- [x] Implement ddim_sample in NoiseScheduler (eta parameter, timestep subsequence)
+- [x] Add sampling_method + sampling_steps to config and DiffusionStrategy
+- [x] Compare: DDIM 50 steps (0.83s) vs DDPM 1000 steps (13.6s) — 16.4x speedup, comparable quality
+- [x] Update 04-diffusion.md tutorial with DDIM section and speed/quality table
+- [x] Smoke test passes with DDIM path
 
 ## 6d. Colored sprites
 - [ ] Slice Kenney colored tilesheet
